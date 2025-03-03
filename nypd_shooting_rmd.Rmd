@@ -1,0 +1,144 @@
+---
+title: "NYPD Shooting data"
+author: "Nathan Rosica"
+date: "2025-03-03"
+output: pdf_document
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = FALSE)
+options(warn=-1)
+library(readr)
+library(tidyr)
+library(dplyr)
+url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv"
+nypd_raw <- read_csv(url)
+
+
+nypd_age_differences <- nypd_raw %>%
+  group_by(PERP_AGE_GROUP, VIC_AGE_GROUP) %>%
+  count() %>%
+  filter(n>1)
+  
+  
+nypd_age_differences <- nypd_age_differences %>%
+  rowwise() %>%
+  filter((PERP_AGE_GROUP)!= "(null)")
+
+nypd_age_differences <- nypd_age_differences %>%
+  rowwise() %>%
+  filter((VIC_AGE_GROUP)!= "UNKNOWN")
+
+nypd_age_differences <- nypd_age_differences %>%
+  mutate(Perp_X = case_when(
+    PERP_AGE_GROUP =="18-24" ~ 1,
+    PERP_AGE_GROUP =="25-44" ~ 2,
+    PERP_AGE_GROUP =="45-64" ~ 3,
+    PERP_AGE_GROUP =="65+" ~ 4
+  ))
+
+nypd_age_differences <- nypd_age_differences %>%
+  mutate(Vic_Y = case_when(
+    VIC_AGE_GROUP =="<18" ~ 1,
+    VIC_AGE_GROUP =="18-24" ~ 2,
+    VIC_AGE_GROUP =="25-44" ~ 3,
+    VIC_AGE_GROUP =="45-64" ~ 4,
+    VIC_AGE_GROUP =="65+" ~ 5
+  ))
+
+nypd_age_differences <- nypd_age_differences %>%
+  mutate(Vic_u18 = case_when(
+    VIC_AGE_GROUP =="<18" ~ n
+  )) %>%
+  mutate(Vic_18_24 = case_when(
+    VIC_AGE_GROUP =="18-24" ~ n
+  )) %>%
+  mutate(Vic_22_44 = case_when(
+    VIC_AGE_GROUP =="25-44" ~ n
+  )) %>%
+  mutate(Vic_45_64 = case_when(
+    VIC_AGE_GROUP =="45-64" ~ n
+  )) %>%
+  mutate(Vic_65 = case_when(
+    VIC_AGE_GROUP =="65+" ~ n
+  ))
+
+library(lubridate)
+nypd_hourly <- nypd_raw %>%
+  mutate(hour = hour(OCCUR_TIME))
+
+nypd_hourly <- nypd_hourly %>%
+  group_by(hour, PRECINCT) %>%
+  count() %>%
+  filter(n>1)
+
+mod <- lm(formula = n~hour, data = nypd_hourly)
+nypd_hourly_pred <- nypd_hourly %>% ungroup() %>% mutate(pred = predict(mod))
+
+library("ggplot2")
+nypd_hourly_pred %>%
+  ggplot(aes(x = PRECINCT, y = hour)) +
+  geom_point(aes(x = n, y = hour, color = "Actual Precinct")) +
+  geom_point(aes(x = pred, y = hour, color = "Predicted")) +
+  scale_y_log10() +
+  labs(title = "Hourly shooting predictions", y = "Hour", x = "Shootings")
+```
+## Age Group of shootings
+
+```{r Age groups of shootings, echo=TRUE}
+labels <- c("18-24","25-44","45-64","65+")
+library("ggplot2")
+nypd_age_differences %>%
+  ggplot(aes(x = factor(Perp_X), y = n, label=VIC_AGE_GROUP)) +
+  geom_point(aes(y = , color = "Victim Age")) +
+  geom_text(hjust=1.2) +
+  scale_y_log10() +
+  scale_x_discrete(label = labels) + 
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle=90)) +
+  labs(title = "Perp vs Vict Age Group", y = NULL, x = "Perp Age")
+```
+From the chart above, we can conclude that most shootings happen where the Perpetrator is of similar age to the victim. For many categories, the most common victim age group is the same as the perpetrator. The only exceptions are the 45-64 range, where it's the 2nd most common grouping, and the 65+ grouping where it may simply be a case of a small sample size.
+
+Of particular note is that the case of a 65+ year old perpertator shooting someone 24 or under is almost unheard of. This suggests that shootings happen between people of similar age groups, and that it's relatively much rarer for it to happen in cases of large age gaps.
+
+There is some possible bias introduced to this data due to how the data is gathered. Shooting incident data for perpetrators under the age of 18 is not collected and included in the data, which may have skewed the results.
+
+## Total shootings occuring at each hour
+
+Here are the NYPD shooting statistics, totaled by precinct, broken down by hour of the day in which they occur. It is clear that most shootings happen early in the morning or late at night.
+```{r Hourly shootings by precinct, echo=TRUE}
+
+library(lubridate)
+nypd_hourly <- nypd_raw %>%
+  mutate(hour = hour(OCCUR_TIME))
+
+nypd_hourly <- nypd_hourly %>%
+  group_by(hour, PRECINCT) %>%
+  count() %>%
+  filter(n>1)
+
+mod <- lm(formula = n~hour, data = nypd_hourly)
+nypd_hourly_pred <- nypd_hourly %>% ungroup() %>% mutate(pred = predict(mod))
+
+nypd_hourly_pred %>%
+  ggplot(aes(x = PRECINCT, y = hour)) +
+  geom_point(aes(x = n, y = hour, color = "Actual Precinct")) +
+  labs(title = "Hourly shootings by precinct", y = "Hour", x = "Shootings")
+  
+```
+
+## Predictions
+By adding a linear prediction model, it becomes more clear how the trend rises during the day to show how more shootings occur in the evenings. 
+```{r Adding Predictions}
+
+mod <- lm(formula = n~hour, data = nypd_hourly)
+nypd_hourly_pred <- nypd_hourly %>% ungroup() %>% mutate(pred = predict(mod))
+library("ggplot2")
+nypd_hourly_pred %>%
+  ggplot(aes(x = PRECINCT, y = hour)) +
+  geom_point(aes(x = n, y = hour, color = "Actual Precinct")) +
+  geom_point(aes(x = pred, y = hour, color = "Predicted")) +
+  labs(title = "Hourly shooting predictions", y = "Hour", x = "Shootings")
+  
+```
